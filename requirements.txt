@@ -4,3 +4,4 @@ plotly
 plotly-calplot
 selenium
 tenacity
+openpyxl

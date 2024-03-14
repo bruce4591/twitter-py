@@ -4,6 +4,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime, timedelta
 import re
 import json
@@ -68,7 +69,10 @@ class TwitterExtractor:
 
                 if date < start_date:
                     self._delete_first_tweet()
-                    continue 
+                    if row["is_pinned"]:
+                        continue
+                    else:
+                        break
                 elif date > end_date:
                     self._delete_first_tweet()
                     continue
@@ -135,11 +139,14 @@ class TwitterExtractor:
             logger.error("Could not find tweet or 'Retry' button")
             raise
 
-    def _navigate_tabs(self, target_tab="Likes"):
+    def _navigate_tabs(self, target_tab="Posts"):
         # Deal with the 'Retry' issue. Not optimal.
         try:
             # Click on the 'Media' tab
-            self.driver.find_element(By.XPATH, "//span[text()='Media']").click()
+            wait = WebDriverWait(self.driver, 10)
+            clickable_element = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Media']")))
+            clickable_element.click()
+            #self.driver.find_element(By.XPATH, "//span[text()='Media']").click()
             time.sleep(2)  # Wait for the Media tab to load
 
             # Click back on the Target tab. If you are fetching posts, you can click on 'Posts' tab
@@ -172,6 +179,7 @@ class TwitterExtractor:
                     if self._get_media_type(tweet) == "Image"
                     else None
                 ),
+                "is_pinned": self.is_pinned(tweet),
             }
         except Exception as e:
             logger.error(f"Error processing tweet: {e}")
@@ -233,7 +241,15 @@ class TwitterExtractor:
                 return True
         except NoSuchElementException:
             return False
-
+    def is_pinned(self,tweet):
+        try:
+            retweet_pinned = tweet.find_element(
+                By.XPATH, ".//span[contains(text(), 'Pinned')]"
+            )
+            if retweet_pinned:
+                return True 
+        except NoSuchElementException:
+            return False 
     def _get_tweet_url(self, tweet):
         try:
             link_element = tweet.find_element(
@@ -328,9 +344,9 @@ class TwitterExtractor:
 if __name__ == "__main__":
     scraper = TwitterExtractor()
     scraper.fetch_tweets(
-        "https://twitter.com/ElonMuskPDA",
-        start_date="2024-03-10",
-        end_date="2024-03-11",
+        "https://twitter.com/babyprodigy66",
+        start_date="2024-03-12",
+        end_date="2024-03-13",
     )  # YYYY-MM-DD format
 
     # If you just want to export to Excel, you can use the following line
