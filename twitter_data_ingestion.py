@@ -2,7 +2,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException,StaleElementReferenceException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime, timedelta
@@ -14,6 +14,7 @@ import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import logging
 from config import TWITTER_AUTH_TOKEN
+from schedule import every , run_pending
 
 
 logging.basicConfig(
@@ -48,7 +49,6 @@ class TwitterExtractor:
         # Convert start_date and end_date from "YYYY-MM-DD" to datetime objects
         start_date = datetime.strptime(start_date, "%Y-%m-%d")
         end_date = datetime.strptime(end_date, "%Y-%m-%d")
-
         while True:
             tweet = self._get_first_tweet()
             if not tweet:
@@ -128,9 +128,13 @@ class TwitterExtractor:
 
             else:
                 # If no error message, assume tweet is present
-                return self.driver.find_element(
-                    By.XPATH, "//article[@data-testid='tweet']"
-                )
+                try:
+                    return self.driver.find_element(
+                        By.XPATH, "//article[@data-testid='tweet']"
+                    )
+                except NoSuchElementException:
+                    logger.error("Could not find tweet")
+                    return None
 
         except TimeoutException:
             logger.error("Timeout waiting for tweet or after clicking 'Retry'")
@@ -139,7 +143,7 @@ class TwitterExtractor:
             logger.error("Could not find tweet or 'Retry' button")
             raise
 
-    def _navigate_tabs(self, target_tab="Posts"):
+    def _navigate_tabs(self, target_tab="For you"):
         # Deal with the 'Retry' issue. Not optimal.
         try:
             # Click on the 'Media' tab
@@ -152,8 +156,17 @@ class TwitterExtractor:
             # Click back on the Target tab. If you are fetching posts, you can click on 'Posts' tab
             self.driver.find_element(By.XPATH, f"//span[text()='{target_tab}']").click()
             time.sleep(2)  # Wait for the Likes tab to reload
-        except NoSuchElementException as e:
+        except ( NoSuchElementException,TimeoutException) as e:
             logger.error("Error navigating tabs: " + str(e))
+        # 如果 "Media" 标签不存在或点击失败，尝试点击 "Following" 标签
+            try:
+                following_tab = "//span[text()='Following']"
+                self.driver.find_element(By.XPATH, following_tab).click()
+                logger.info("Navigated to 'Following' tab instead.")
+                time.sleep(2)  # 等待 "Following" 标签加载
+            except NoSuchElementException as e:
+                logger.error(f"Error navigating to 'Following' tab: {str(e)}")
+                return  # 如果 "Following" 标签也不存在，退出方法
 
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     def _process_tweet(self, tweet):
@@ -166,9 +179,9 @@ class TwitterExtractor:
                 ),
                 "author_name": author_name,
                 "author_handle": author_handle,
-                "date": self._get_element_attribute(tweet, "time", "datetime")[:10],
+                "date": self._get_element_attribute(tweet, "time", "datetime")[:10] or "",
                 "lang": self._get_element_attribute(
-                    tweet, "div[data-testid='tweetText']", "lang"
+                    tweet, "div[data-testid='tweetText']", "lang" or None
                 ),
                 "url": self._get_tweet_url(tweet),
                 "mentioned_urls": self._get_mentioned_urls(tweet),
@@ -217,7 +230,9 @@ class TwitterExtractor:
             return parent.find_element(By.CSS_SELECTOR, selector).get_attribute(
                 attribute
             )
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
+            print(f"Error getting attribute '{attribute}' from element with selector '{selector}': {e}")
+    
             return ""
 
     def _get_mentioned_urls(self, tweet):
@@ -341,13 +356,16 @@ class TwitterExtractor:
         )
 
 
+
 if __name__ == "__main__":
     scraper = TwitterExtractor()
-    scraper.fetch_tweets(
-        "https://twitter.com/babyprodigy66",
-        start_date="2024-03-12",
-        end_date="2024-03-13",
-    )  # YYYY-MM-DD format
+    while True:
+        scraper.fetch_tweets(
+            "https://twitter.com/home",
+            start_date="2024-03-18",
+            end_date="2024-03-19",
+        )
+        time.sleep(120)
 
     # If you just want to export to Excel, you can use the following line
     # scraper._save_to_excel(json_filename="tweets_2024-02-01_14-30-00.json", output_filename="tweets_2024-02-01_14-30-00.xlsx")
