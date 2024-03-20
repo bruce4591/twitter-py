@@ -318,20 +318,26 @@ class TwitterExtractor:
         return author_name, author_handle
 
     def _get_media_type(self, tweet):
-        if tweet.find_elements(By.CSS_SELECTOR, "div[data-testid='videoPlayer']"):
-            return "Video"
-        if tweet.find_elements(By.CSS_SELECTOR, "div[data-testid='tweetPhoto']"):
-            return "Image"
-        return "No media"
+        try:
+            if tweet.find_elements(By.CSS_SELECTOR, "div[data-testid='videoPlayer']"):
+                return "Video"
+            if tweet.find_elements(By.CSS_SELECTOR, "div[data-testid='tweetPhoto']"):
+                return "Image"
+            return "No media"
+        except (NoSuchElementException,StaleElementReferenceException) as e:
+            return "No media" 
 
     def _get_images_urls(self, tweet):
         images_urls = []
-        images_elements = tweet.find_elements(
-            By.XPATH, ".//div[@data-testid='tweetPhoto']//img"
-        )
-        for image_element in images_elements:
-            images_urls.append(image_element.get_attribute("src"))
-        return images_urls
+        try:
+            images_elements = tweet.find_elements(
+                By.XPATH, ".//div[@data-testid='tweetPhoto']//img"
+            )
+            for image_element in images_elements:
+                images_urls.append(image_element.get_attribute("src"))
+            return images_urls
+        except (NoSuchElementException,StaleElementReferenceException) as e:
+            return "No urls"
 
     def _extract_number_from_aria_label(self, tweet, testid):
         try:
@@ -340,7 +346,7 @@ class TwitterExtractor:
             ).get_attribute("aria-label")
             numbers = [int(s) for s in re.findall(r"\b\d+\b", text)]
             return numbers[0] if numbers else 0
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             return 0
 
     def _delete_first_tweet(self, sleep_time_range_ms=(0, 1000)):
@@ -349,7 +355,7 @@ class TwitterExtractor:
                 By.XPATH, "//article[@data-testid='tweet'][1]"
             )
             self.driver.execute_script("arguments[0].remove();", tweet)
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             logger.info("Could not find the first tweet to delete.")
 
     @staticmethod
