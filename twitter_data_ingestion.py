@@ -15,6 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 import logging
 from config import TWITTER_AUTH_TOKEN
 from schedule import every , run_pending
+import random
 
 
 logging.basicConfig(
@@ -44,11 +45,24 @@ class TwitterExtractor:
 
     def fetch_tweets(self, page_url, start_date, end_date):
         self.driver.get(page_url)
-        cur_filename = f"data/tweets_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-
+        cur_filename = f"data/tweets_{datetime.now().strftime('%Y-%m-%d')}"
+        try:
+            random_number = random.randint(10,20)
+            wait = WebDriverWait(self.driver,random_number)
+            following_tab = wait.until(EC.visibility_of_element_located((By.XPATH, "//span[text()='Following']")))
+            following_tab.click()
+            #following_tab = "//span[text()='Following']"
+            #self.driver.find_element(By.XPATH, following_tab).click()
+            logger.info("Navigated to 'Following' tab instead.")
+            time.sleep(random_number)  # 等待 "Following" 标签加载
+        except NoSuchElementException as e:
+            logger.error(f"Error navigating to 'Following' tab: {str(e)}")
+            return  # 如果 "Following" 标签也不存在，退出方法
+    
         # Convert start_date and end_date from "YYYY-MM-DD" to datetime objects
-        start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+        #start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        #end_date = datetime.strptime(end_date, "%Y-%m-%d")
+        daycount = 0
         while True:
             tweet = self._get_first_tweet()
             if not tweet:
@@ -57,7 +71,7 @@ class TwitterExtractor:
             row = self._process_tweet(tweet)
             if row["date"]:
                 try:
-                    date = datetime.strptime(row["date"], "%Y-%m-%d")
+                    date = datetime.strptime(row["date"], "%Y-%m-%d %H")
 
                 except ValueError as e:
                     # infer date format
@@ -72,7 +86,9 @@ class TwitterExtractor:
                     if row["is_pinned"]:
                         continue
                     else:
-                        break
+                        daycount = daycount + 1
+                        if daycount > 5:
+                            break
                 elif date > end_date:
                     self._delete_first_tweet()
                     continue
@@ -143,19 +159,24 @@ class TwitterExtractor:
             logger.error("Could not find tweet or 'Retry' button")
             raise
 
-    def _navigate_tabs(self, target_tab="For you"):
+    def _navigate_tabs(self, target_tab="Following"):
         # Deal with the 'Retry' issue. Not optimal.
         try:
             # Click on the 'Media' tab
-            wait = WebDriverWait(self.driver, 10)
+            random_number = random.randint(8, 20)
+            wait = WebDriverWait(self.driver, random_number)
             clickable_element = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Media']")))
             clickable_element.click()
             #self.driver.find_element(By.XPATH, "//span[text()='Media']").click()
-            time.sleep(2)  # Wait for the Media tab to load
+            time.sleep(random_number)  # Wait for the Media tab to load
 
             # Click back on the Target tab. If you are fetching posts, you can click on 'Posts' tab
-            self.driver.find_element(By.XPATH, f"//span[text()='{target_tab}']").click()
-            time.sleep(2)  # Wait for the Likes tab to reload
+            wait = WebDriverWait(self.driver, random_number)
+            clickable_element = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='{target_tab}']")))
+            clickable_element.click()
+
+            #self.driver.find_element(By.XPATH, f"//span[text()='{target_tab}']").click()
+            time.sleep(random_number)  # Wait for the Likes tab to reload
         except ( NoSuchElementException,TimeoutException) as e:
             logger.error("Error navigating tabs: " + str(e))
         # 如果 "Media" 标签不存在或点击失败，尝试点击 "Following" 标签
@@ -163,7 +184,7 @@ class TwitterExtractor:
                 following_tab = "//span[text()='Following']"
                 self.driver.find_element(By.XPATH, following_tab).click()
                 logger.info("Navigated to 'Following' tab instead.")
-                time.sleep(2)  # 等待 "Following" 标签加载
+                time.sleep(random_number)  # 等待 "Following" 标签加载
             except NoSuchElementException as e:
                 logger.error(f"Error navigating to 'Following' tab: {str(e)}")
                 return  # 如果 "Following" 标签也不存在，退出方法
@@ -179,7 +200,7 @@ class TwitterExtractor:
                 ),
                 "author_name": author_name,
                 "author_handle": author_handle,
-                "date": self._get_element_attribute(tweet, "time", "datetime")[:10] or "",
+                "date": self._get_element_attribute(tweet, "time", "datetime")[:13] or "",
                 "lang": self._get_element_attribute(
                     tweet, "div[data-testid='tweetText']", "lang" or None
                 ),
@@ -200,8 +221,8 @@ class TwitterExtractor:
             raise
         # Convert date format
         if data["date"]:
-            data["date"] = datetime.strptime(data["date"], "%Y-%m-%d").strftime(
-                "%Y-%m-%d"
+            data["date"] = datetime.strptime(data["date"], "%Y-%m-%dT%H").strftime(
+                "%Y-%m-%d %H"
             )
 
         # Extract numbers from aria-labels
@@ -217,7 +238,7 @@ class TwitterExtractor:
     def _get_element_text(self, parent, selector):
         try:
             return parent.find_element(By.XPATH, selector).text
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             logger.error(f"Element not found: {selector}")
             return ""
         except Exception as e:
@@ -231,7 +252,7 @@ class TwitterExtractor:
                 attribute
             )
         except (NoSuchElementException,StaleElementReferenceException) as e:
-            print(f"Error getting attribute '{attribute}' from element with selector '{selector}': {e}")
+            logger.error(f"Error getting attribute '{attribute}' from element with selector '{selector}': {e}")
     
             return ""
 
@@ -243,7 +264,7 @@ class TwitterExtractor:
             )
             urls = [elem.get_attribute("href") for elem in link_elements]
             return urls
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             return []
 
     def is_retweet(self, tweet):
@@ -254,7 +275,7 @@ class TwitterExtractor:
             )
             if retweet_indicator:
                 return True
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             return False
     def is_pinned(self,tweet):
         try:
@@ -263,7 +284,7 @@ class TwitterExtractor:
             )
             if retweet_pinned:
                 return True 
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             return False 
     def _get_tweet_url(self, tweet):
         try:
@@ -271,7 +292,7 @@ class TwitterExtractor:
                 By.XPATH, ".//a[contains(@href, '/status/')]"
             )
             return link_element.get_attribute("href")
-        except NoSuchElementException:
+        except (NoSuchElementException,StaleElementReferenceException) as e:
             return ""
 
     def _extract_author_details(self, tweet):
@@ -334,7 +355,7 @@ class TwitterExtractor:
     @staticmethod
     def _save_to_json(data, filename="data.json"):
         with open(filename, "a", encoding="utf-8") as file:
-            json.dump(data, file)
+            json.dump(data, file,ensure_ascii=False)
             file.write("\n")
 
     @staticmethod
@@ -360,12 +381,17 @@ class TwitterExtractor:
 if __name__ == "__main__":
     scraper = TwitterExtractor()
     while True:
+        now = datetime.now()
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start_date_hour = now - timedelta(hours=24)
+
         scraper.fetch_tweets(
             "https://twitter.com/home",
-            start_date="2024-03-18",
-            end_date="2024-03-19",
+            start_date_hour,
+            now,
         )
-        time.sleep(120)
+        random_number = random.randint(100, 300)
+        time.sleep(random_number)
 
     # If you just want to export to Excel, you can use the following line
     # scraper._save_to_excel(json_filename="tweets_2024-02-01_14-30-00.json", output_filename="tweets_2024-02-01_14-30-00.xlsx")
