@@ -16,7 +16,8 @@ import logging
 from config import TWITTER_AUTH_TOKEN
 from schedule import every , run_pending
 import random
-
+import platform
+import requests
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -28,10 +29,16 @@ class TwitterExtractor:
     def __init__(self, headless=True):
         self.driver = self._start_chrome(headless)
         self.set_token()
+        self.one_fectch_twitter_map = {}
+        self.twitter_map = {}
 
     def _start_chrome(self, headless):
         options = Options()
         options.headless = headless
+        if platform.system() == "Darwin":  # MacOS
+            options.add_argument("--start-fullscreen")
+        else:
+            options.add_argument("--start-maximized")
         driver = webdriver.Chrome(options=options)
         driver.get("https://twitter.com")
         return driver
@@ -93,16 +100,23 @@ class TwitterExtractor:
                     self._delete_first_tweet()
                     continue
 
-            self._save_to_json(row, filename=f"{cur_filename}.json")
+            #如果推文的URL已经在twitter_map中，则删除第一个推文
+            if row["url"] in self.twitter_map:
+                self._delete_first_tweet()
+                continue
+
+            
+            self.one_fectch_twitter_map[row["url"]] = row
+            #self._save_to_json(row, filename=f"{cur_filename}.json")
             logger.info(
                 f"Saving tweets...\n{row['date']},  {row['author_name']} -- {row['text'][:50]}...\n\n"
             )
             self._delete_first_tweet()
 
         # Save to Excel
-        self._save_to_excel(
-            json_filename=f"{cur_filename}.json", output_filename=f"{cur_filename}.xlsx"
-        )
+        #self._save_to_excel(
+        #    json_filename=f"{cur_filename}.json", output_filename=f"{cur_filename}.xlsx"
+        #)
 
     @retry(
         stop=stop_after_attempt(5),
@@ -154,10 +168,10 @@ class TwitterExtractor:
 
         except TimeoutException:
             logger.error("Timeout waiting for tweet or after clicking 'Retry'")
-            raise
+            return None
         except NoSuchElementException:
             logger.error("Could not find tweet or 'Retry' button")
-            raise
+            raise TimeoutException("NoSuchElementException")
 
     def _navigate_tabs(self, target_tab="Following"):
         # Deal with the 'Retry' issue. Not optimal.
@@ -382,20 +396,167 @@ class TwitterExtractor:
             f"\n\nDone saving to {output_filename}. Total of {len(cur_df)} unique tweets."
         )
 
+def boyer_moore(text, pattern):
+    # Boyer-Moore string search algorithm
+    # 构建坏字符表
+    bad_char_table = {}
+    for i in range(len(pattern) - 1):
+        bad_char_table[pattern[i]] = len(pattern) - 1 - i
 
+    # 构建好后缀表
+    good_suffix_table = [len(pattern)] * len(pattern)
+    for i in range(len(pattern) - 1):
+        suffix = pattern[i + 1:]
+        for j in range(len(pattern) - 1, i, -1):
+            if suffix[j - i - 1] != pattern[j]:
+                break
+            good_suffix_table[j] = len(pattern) - 1 - j + i
+
+    # 匹配过程
+    i = len(pattern) - 1
+    while i < len(text):
+        j = len(pattern) - 1
+        while j >= 0 and text[i - j] == pattern[j]:
+            j -= 1
+        if j < 0:
+            return i
+        else:
+            i += max(bad_char_table.get(text[i], len(pattern)), good_suffix_table[j])
+
+        return -1
+    
+
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.fail = None  # 失败指针
+        self.output = []  # 存储在此节点结束的所有字典词
+
+class AhoCorasick:
+    def __init__(self):
+        self.root = TrieNode()
+
+    def add_word(self, word):
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.output.append(word)
+
+    def build_failure_pointers(self):
+        queue = []
+        for child in self.root.children.values():
+            child.fail = self.root
+            queue.append(child)
+        while queue:
+            current_node = queue.pop(0)
+            for char, child_node in current_node.children.items():
+                queue.append(child_node)
+                fail_node = current_node.fail
+                while fail_node is not None and char not in fail_node.children:
+                    fail_node = fail_node.fail
+                child_node.fail = fail_node.children[char] if fail_node else self.root
+                child_node.output += child_node.fail.output
+
+    def is_word_boundary(self, text, pos, pattern_len):
+        """
+        检查给定位置的匹配是否在单词边界上。
+        """
+        start_boundary = pos == 0 or text[pos - 1].isspace() or not text[pos - 1].isalpha()
+        end_boundary = (pos + pattern_len) == len(text) or text[pos + pattern_len].isspace() or not text[pos + pattern_len].isalpha()
+        return start_boundary and end_boundary
+    
+    def search(self, text):
+        node = self.root
+        for i, char in enumerate(text):
+            while node is not None and char not in node.children:
+                node = node.fail
+            if node is None:
+                node = self.root
+                continue
+            node = node.children[char]
+            if node.output:
+                 for pattern in node.output:
+                    if self.is_word_boundary(text, i - len(pattern) + 1, len(pattern)):
+                        print(f"Found '{pattern}' at position {i - len(pattern) + 1}")
+                        return True
+        return False
+              
+class CryptocurrencyFileManager:
+    def __init__(self,file_path):
+        self.file_path = file_path
+        self.json_data = None
+        self.combined_list = []
+
+    def read_json_data(self):
+        try:
+            print(os.getcwd())
+            with open(self.file_path,"r") as file:
+                self.json_data = json.load(file)
+                return self.json_data
+        except FileNotFoundError as e:
+            logger.error(f"File not found: {self.file_path}")
+            return None
+        
+    def parse_data(self):
+        for item in self.json_data["data"]:
+            self.combined_list.append(item["name"])
+            self.combined_list.append(item["symbol"])
+        return self.combined_list
+    
+
+class Lark:
+    def __init__(self) -> None:
+        self.url = "https://open.larksuite.com/open-apis/bot/v2/hook/f15c4239-2622-40e4-94dd-da4f934be668"
+        self.content_type = "application/json"
+        self.context = None
+
+    def send_message(self, message):
+        data = {
+            "msg_type": "text",
+            "content": {
+                "text": message
+            }
+        }
+        response = requests.post(self.url, headers={"Content-Type": self.content_type}, json=data)
+        return response.json()
+    
 
 if __name__ == "__main__":
+    
+    crypto = CryptocurrencyFileManager("cpytocurrency.json")
+    crypto.read_json_data()
+    crypto.parse_data()
+
+    ac = AhoCorasick()
+    for word in crypto.combined_list:
+        ac.add_word(word)
+    ac.build_failure_pointers()
+
     scraper = TwitterExtractor()
+
+    lark = Lark()
     while True:
         now = datetime.now()
         now = now.replace(minute=0, second=0, microsecond=0)
-        start_date_hour = now - timedelta(hours=24)
+        start_date_hour = now - timedelta(hours=12)
 
         scraper.fetch_tweets(
             "https://twitter.com/home",
             start_date_hour,
             now,
         )
+
+        for key,value in scraper.one_fectch_twitter_map.items():
+            found = ac.search(value["text"])
+            if found:
+                scraper.twitter_map[key] = value
+                # Save to JSON
+                scraper._save_to_json(scraper.twitter_map, filename=f"data/tweets_{now.strftime('%Y-%m-%d_%H-%M-%S')}.json")
+                # Send message to Lark
+                json_data = json.dumps(value, ensure_ascii=False, indent=4)
+                lark.send_message(json_data)
         random_number = random.randint(100, 300)
         time.sleep(random_number)
 
