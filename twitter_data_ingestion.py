@@ -2,7 +2,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, TimeoutException,StaleElementReferenceException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException,StaleElementReferenceException,WebDriverException,ElementClickInterceptedException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime, timedelta
@@ -18,6 +18,8 @@ from schedule import every , run_pending
 import random
 import platform
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -37,8 +39,8 @@ class TwitterExtractor:
         options.headless = headless
         if platform.system() == "Darwin":  # MacOS
             options.add_argument("--start-fullscreen")
-        else:
-            options.add_argument("--start-maximized")
+        #else:
+            #options.add_argument("--start-maximized")
         driver = webdriver.Chrome(options=options)
         driver.get("https://twitter.com")
         return driver
@@ -63,16 +65,23 @@ class TwitterExtractor:
             logger.info("Navigated to 'Following' tab instead.")
             time.sleep(random_number)  # 等待 "Following" 标签加载
         except NoSuchElementException as e:
-            logger.error(f"Error navigating to 'Following' tab: {str(e)}")
+            logger.error(f"Error NoSuchElementException to 'Following' tab: {str(e)}")
             return  # 如果 "Following" 标签也不存在，退出方法
+        except StaleElementReferenceException as e:
+            logger.error(f"Error StaleElementReferenceException to 'Following' tab: {str(e)}")
+            return
     
         # Convert start_date and end_date from "YYYY-MM-DD" to datetime objects
         #start_date = datetime.strptime(start_date, "%Y-%m-%d")
         #end_date = datetime.strptime(end_date, "%Y-%m-%d")
         daycount = 0
+        first_count=0
         while True:
             tweet = self._get_first_tweet()
             if not tweet:
+                if first_count > 3:
+                    break
+                first_count= first_count+1
                 continue
 
             row = self._process_tweet(tweet)
@@ -172,6 +181,16 @@ class TwitterExtractor:
         except NoSuchElementException:
             logger.error("Could not find tweet or 'Retry' button")
             raise TimeoutException("NoSuchElementException")
+        except ElementClickInterceptedException as e:
+            logger.error("ElementClickInterceptedException")
+            self.driver.execute_script("document.querySelector('.ad_close_button').click();")
+            raise TimeoutException("ElementClickInterceptedException") 
+        except WebDriverException as e:
+            logger.error("WebDriverException")
+            raise TimeoutException("NoSuchElementException") 
+        
+
+
 
     def _navigate_tabs(self, target_tab="Following"):
         # Deal with the 'Retry' issue. Not optimal.
@@ -186,7 +205,7 @@ class TwitterExtractor:
 
             # Click back on the Target tab. If you are fetching posts, you can click on 'Posts' tab
             wait = WebDriverWait(self.driver, random_number)
-            clickable_element = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='{target_tab}']")))
+            clickable_element = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Following']")))
             clickable_element.click()
 
             #self.driver.find_element(By.XPATH, f"//span[text()='{target_tab}']").click()
@@ -195,9 +214,9 @@ class TwitterExtractor:
             logger.error("Error navigating tabs: " + str(e))
         # 如果 "Media" 标签不存在或点击失败，尝试点击 "Following" 标签
             try:
-                following_tab = "//span[text()='Following']"
+                following_tab = "//span[text()='For You']"
                 self.driver.find_element(By.XPATH, following_tab).click()
-                logger.info("Navigated to 'Following' tab instead.")
+                logger.info("Navigated to 'For you' tab instead.")
                 time.sleep(random_number)  # 等待 "Following" 标签加载
             except NoSuchElementException as e:
                 logger.error(f"Error navigating to 'Following' tab: {str(e)}")
@@ -519,8 +538,17 @@ class Lark:
                 "text": message
             }
         }
-        response = requests.post(self.url, headers={"Content-Type": self.content_type}, json=data)
-        return response.json()
+        
+        session = requests.Session()
+        retries = Retry(total=5, backoff_factor=0.1,status_forcelist=[500,502,503,504])
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        try:
+            response = session.post(self.url, headers={"Content-Type": self.content_type}, json=data)
+            return response.json()
+        except requests.exceptions.ConnectionError as e:
+            logger.error(" request failed: ", e)
+            return None
+    
     
 
 if __name__ == "__main__":
@@ -553,12 +581,13 @@ if __name__ == "__main__":
             if found:
                 scraper.twitter_map[key] = value
                 # Save to JSON
-                scraper._save_to_json(scraper.twitter_map, filename=f"data/tweets_{now.strftime('%Y-%m-%d_%H-%M-%S')}.json")
+                scraper._save_to_json(value, filename=f"data/tweets_{now.strftime('%Y-%m-%d')}.json")
                 # Send message to Lark
                 json_data = json.dumps(value, ensure_ascii=False, indent=4)
                 lark.send_message(json_data)
         random_number = random.randint(100, 300)
         time.sleep(random_number)
+        scraper.one_fectch_twitter_map.clear()
 
     # If you just want to export to Excel, you can use the following line
     # scraper._save_to_excel(json_filename="tweets_2024-02-01_14-30-00.json", output_filename="tweets_2024-02-01_14-30-00.xlsx")
