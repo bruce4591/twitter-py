@@ -568,7 +568,7 @@ if __name__ == "__main__":
     while True:
         now = datetime.now()
         now = now.replace(minute=0, second=0, microsecond=0)
-        start_date_hour = now - timedelta(hours=12)
+        start_date_hour = now - timedelta(hours=24)
 
         scraper.fetch_tweets(
             "https://twitter.com/home",
