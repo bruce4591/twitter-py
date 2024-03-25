@@ -77,7 +77,11 @@ class TwitterExtractor:
         daycount = 0
         first_count=0
         while True:
-            tweet = self._get_first_tweet()
+            try:
+                tweet = self._get_first_tweet()
+            except TimeoutException:
+                logger.error("Timeout waiting _get_first_tweet tweet or after clicking 'Retry'")
+                return None
             if not tweet:
                 if first_count > 3:
                     break
@@ -183,7 +187,7 @@ class TwitterExtractor:
             raise TimeoutException("NoSuchElementException")
         except ElementClickInterceptedException as e:
             logger.error("ElementClickInterceptedException")
-            self.driver.execute_script("document.querySelector('.ad_close_button').click();")
+            #self.driver.execute_script("document.querySelector('.ad_close_button').click();")
             raise TimeoutException("ElementClickInterceptedException") 
         except WebDriverException as e:
             logger.error("WebDriverException")
@@ -221,6 +225,12 @@ class TwitterExtractor:
             except NoSuchElementException as e:
                 logger.error(f"Error navigating to 'Following' tab: {str(e)}")
                 return  # 如果 "Following" 标签也不存在，退出方法
+        except ElementClickInterceptedException as e:
+            logger.error("ElementClickInterceptedException")
+            popup_window = WebDriverWait(self.driver, 10).until(EC.number_of_windows_to_be(2))
+            self.driver.switch_to.window(self.driver.window_handles[1])
+            self.driver.close()
+            self.driver.switch_to.window(self.driver.window_handles[0])
 
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     def _process_tweet(self, tweet):
