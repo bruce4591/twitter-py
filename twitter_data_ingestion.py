@@ -112,7 +112,7 @@ class TwitterExtractor:
                         continue
                     else:
                         daycount = daycount + 1
-                        if daycount > 5:
+                        if daycount > 10:
                             break
                 elif date > end_date:
                     self._delete_first_tweet()
@@ -600,7 +600,7 @@ if __name__ == "__main__":
                 # Send message to Lark
                 json_data = json.dumps(value, ensure_ascii=False, indent=4)
                 lark.send_message(json_data)
-        random_number = random.randint(100, 300)
+        random_number = random.randint(1000, 1500)
         time.sleep(random_number)
         scraper.one_fectch_twitter_map.clear()
 
