@@ -70,6 +70,9 @@ class TwitterExtractor:
         except StaleElementReferenceException as e:
             logger.error(f"Error StaleElementReferenceException to 'Following' tab: {str(e)}")
             return
+        except TimeoutException as e:
+            logger.error(f"Error fetch_tweets timeout: {str(e)}")
+            return
     
         # Convert start_date and end_date from "YYYY-MM-DD" to datetime objects
         #start_date = datetime.strptime(start_date, "%Y-%m-%d")
@@ -79,6 +82,8 @@ class TwitterExtractor:
         while True:
             try:
                 tweet = self._get_first_tweet()
+                random_number = random.randint(1,3)
+                time.sleep(random_number)
             except TimeoutException:
                 logger.error("Timeout waiting _get_first_tweet tweet or after clicking 'Retry'")
                 return None
