@@ -214,9 +214,10 @@ class TwitterExtractor:
         #author_name, author_handle = self._extract_author_details(tweet)
         try:
             data = {
+                "text": self._get_reader_contect(tweet),
                 "date": self._get_element_attribute(tweet, "time", "datetime")[:13] or "",
                 "url": self._get_mentioned_urls(tweet), 
-                "text": self._get_reader_contect(tweet),
+                "souce":"Reddit",
             }
         except Exception as e:
             logger.error(f"Error processing tweet: {e}")
@@ -229,11 +230,11 @@ class TwitterExtractor:
             )
 
         # Extract numbers from aria-labels
-        data.update(
-            {
-                "num_reply": self._get_pretty(tweet)
-            }
-        )
+        #data.update(
+        #    {
+        #        "num_reply": self._get_pretty(tweet)
+        #    }
+        #)
         return data
 
     def _get_element_text(self, parent, selector):
@@ -281,9 +282,10 @@ class TwitterExtractor:
     def _get_pretty(self,tweet):
         try:
             element = tweet.find_element(
-                By.XPATH, "//faceplate-number"
-            ).get_attribute('number')
-            return element
+                By.XPATH, "//faceplate-number[@pretty]"
+            )
+            num = element.get_attribute("number")
+            return num
         except (NoSuchElementException,StaleElementReferenceException) as e:
             logger.error("Could not find reader content.",e.msg)
             return ""               
