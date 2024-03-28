@@ -108,12 +108,9 @@ class TwitterExtractor:
 
                 if date < start_date:
                     self._delete_first_tweet()
-                    if row["is_pinned"]:
-                        continue
-                    else:
-                        daycount = daycount + 1
-                        if daycount > 10:
-                            break
+                    daycount = daycount + 1
+                    if daycount > 25:
+                        break
                 elif date > end_date:
                     self._delete_first_tweet()
                     continue
