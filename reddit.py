@@ -41,8 +41,13 @@ class TwitterExtractor:
            # options.add_argument("--start-fullscreen")
         #else:
             #options.add_argument("--start-maximized")
+        
+        prefs = {"profile.default_content_setting_values.notifications" : 2}
+        options.add_experimental_option("prefs", prefs)
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
         driver = webdriver.Chrome(options=options)
-        driver.get("https://www.reddit.com/r/CryptoCurrency/")
+        driver.get("https://www.reddit.com/r/CryptoCurrency/new")
         return driver
 
     def set_token(self, auth_token=TWITTER_AUTH_TOKEN):
@@ -561,7 +566,7 @@ if __name__ == "__main__":
         start_date_hour = now - timedelta(hours=24)
 
         scraper.fetch_tweets(
-            "https://www.reddit.com/r/CryptoCurrency/",
+            "https://www.reddit.com/r/CryptoCurrency/new",
             start_date_hour,
             now,
         )
