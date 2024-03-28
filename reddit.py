@@ -30,19 +30,19 @@ logger = logging.getLogger(__name__)
 class TwitterExtractor:
     def __init__(self, headless=True):
         self.driver = self._start_chrome(headless)
-        self.set_token()
+        #self.set_token()
         self.one_fectch_twitter_map = {}
         self.twitter_map = {}
 
     def _start_chrome(self, headless):
         options = Options()
         options.headless = headless
-        if platform.system() == "Darwin":  # MacOS
-            options.add_argument("--start-fullscreen")
+        #if platform.system() == "Darwin":  # MacOS
+           # options.add_argument("--start-fullscreen")
         #else:
             #options.add_argument("--start-maximized")
         driver = webdriver.Chrome(options=options)
-        driver.get("https://twitter.com")
+        driver.get("https://www.reddit.com/r/CryptoCurrency/")
         return driver
 
     def set_token(self, auth_token=TWITTER_AUTH_TOKEN):
@@ -55,28 +55,6 @@ class TwitterExtractor:
     def fetch_tweets(self, page_url, start_date, end_date):
         self.driver.get(page_url)
         cur_filename = f"data/tweets_{datetime.now().strftime('%Y-%m-%d')}"
-        try:
-            random_number = random.randint(10,20)
-            wait = WebDriverWait(self.driver,random_number)
-            following_tab = wait.until(EC.visibility_of_element_located((By.XPATH, "//span[text()='Following']")))
-            following_tab.click()
-            #following_tab = "//span[text()='Following']"
-            #self.driver.find_element(By.XPATH, following_tab).click()
-            logger.info("Navigated to 'Following' tab instead.")
-            time.sleep(random_number)  # 等待 "Following" 标签加载
-        except NoSuchElementException as e:
-            logger.error(f"Error NoSuchElementException to 'Following' tab: {str(e)}")
-            return  # 如果 "Following" 标签也不存在，退出方法
-        except StaleElementReferenceException as e:
-            logger.error(f"Error StaleElementReferenceException to 'Following' tab: {str(e)}")
-            return
-        except TimeoutException as e:
-            logger.error(f"Error fetch_tweets timeout: {str(e)}")
-            return
-    
-        # Convert start_date and end_date from "YYYY-MM-DD" to datetime objects
-        #start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        #end_date = datetime.strptime(end_date, "%Y-%m-%d")
         daycount = 0
         first_count=0
         while True:
@@ -108,11 +86,9 @@ class TwitterExtractor:
 
                 if date < start_date:
                     self._delete_first_tweet()
-                    if row["is_pinned"]:
-                        continue
-                    else:
-                        daycount = daycount + 1
-                        if daycount > 10:
+                    daycount = daycount + 1
+                    if daycount > 10:
+                            logger.info("daycount > 10")
                             break
                 elif date > end_date:
                     self._delete_first_tweet()
@@ -127,7 +103,7 @@ class TwitterExtractor:
             self.one_fectch_twitter_map[row["url"]] = row
             #self._save_to_json(row, filename=f"{cur_filename}.json")
             logger.info(
-                f"Saving tweets...\n{row['date']},  {row['author_handle']} -- {row['text'][:50]}...\n\n"
+                f"Saving tweets...\n{row['date']}, -- {row['text'][:50]}...\n\n"
             )
             self._delete_first_tweet()
 
@@ -147,7 +123,7 @@ class TwitterExtractor:
         try:
             # Wait for either a tweet or the error message to appear
             WebDriverWait(self.driver, timeout).until(
-                lambda d: d.find_elements(By.XPATH, "//article[@data-testid='tweet']")
+                lambda d: d.find_elements(By.XPATH, "//article[@class='w-full m-0']")
                 or d.find_elements(By.XPATH, "//span[contains(text(),'Try reloading')]")
             )
 
@@ -162,13 +138,8 @@ class TwitterExtractor:
                 logger.info(
                     "You do not have to worry about data duplication though. The save to excel part does the dedup."
                 )
-                self._navigate_tabs()
+                #self._navigate_tabs()
 
-                WebDriverWait(self.driver, timeout).until(
-                    lambda d: d.find_elements(
-                        By.XPATH, "//article[@data-testid='tweet']"
-                    )
-                )
             elif error_message and not use_hacky_workaround_for_reloading_issue:
                 raise TimeoutException(
                     "Error message present. Not using hacky workaround."
@@ -178,7 +149,7 @@ class TwitterExtractor:
                 # If no error message, assume tweet is present
                 try:
                     return self.driver.find_element(
-                        By.XPATH, "//article[@data-testid='tweet']"
+                        By.XPATH, "//article[@class='w-full m-0']"
                     )
                 except NoSuchElementException:
                     logger.error("Could not find tweet")
@@ -239,21 +210,13 @@ class TwitterExtractor:
 
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     def _process_tweet(self, tweet):
-
-        author_name, author_handle = self._extract_author_details(tweet)
+        
+        #author_name, author_handle = self._extract_author_details(tweet)
         try:
             data = {
-                "text": self._get_element_text(
-                    tweet, ".//div[@data-testid='tweetText']"
-                ),
-               # "author_name": author_name,
-                "author_handle": author_handle,
                 "date": self._get_element_attribute(tweet, "time", "datetime")[:13] or "",
-                "url": self._get_tweet_url(tweet),
-                "source":"Twitter",
-                #"mentioned_urls": self._get_mentioned_urls(tweet),
-                #"is_retweet": self.is_retweet(tweet),
-                #"media_type": self._get_media_type(tweet),
+                "url": self._get_mentioned_urls(tweet), 
+                "text": self._get_reader_contect(tweet),
             }
         except Exception as e:
             logger.error(f"Error processing tweet: {e}")
@@ -268,9 +231,7 @@ class TwitterExtractor:
         # Extract numbers from aria-labels
         data.update(
             {
-                "num_reply": self._extract_number_from_aria_label(tweet, "reply"),
-                "num_retweet": self._extract_number_from_aria_label(tweet, "retweet"),
-                "num_like": self._extract_number_from_aria_label(tweet, "like"),
+                "num_reply": self._get_pretty(tweet)
             }
         )
         return data
@@ -303,9 +264,29 @@ class TwitterExtractor:
                 By.XPATH, ".//a[contains(@href, 'http')]"
             )
             urls = [elem.get_attribute("href") for elem in link_elements]
-            return urls
+            if len(urls) == 0:
+                urls.append("http:default")
+            return urls[0]
         except (NoSuchElementException,StaleElementReferenceException) as e:
             return []
+    def _get_reader_contect(self,tweet):
+        try:
+            element = tweet.find_element(
+                By.CSS_SELECTOR, "a[slot='full-post-link']"
+            )
+            return element.text
+        except (NoSuchElementException,StaleElementReferenceException) as e:
+            logger.error("Could not find reader content.",e.msg)
+            return ""
+    def _get_pretty(self,tweet):
+        try:
+            element = tweet.find_element(
+                By.XPATH, "//faceplate-number"
+            ).get_attribute('number')
+            return element
+        except (NoSuchElementException,StaleElementReferenceException) as e:
+            logger.error("Could not find reader content.",e.msg)
+            return ""               
 
     def is_retweet(self, tweet):
         try:
@@ -392,7 +373,7 @@ class TwitterExtractor:
     def _delete_first_tweet(self, sleep_time_range_ms=(0, 1000)):
         try:
             tweet = self.driver.find_element(
-                By.XPATH, "//article[@data-testid='tweet'][1]"
+                By.XPATH, "//article[@class='w-full m-0']"
             )
             self.driver.execute_script("arguments[0].remove();", tweet)
         except (NoSuchElementException,StaleElementReferenceException) as e:
@@ -578,7 +559,7 @@ if __name__ == "__main__":
         start_date_hour = now - timedelta(hours=24)
 
         scraper.fetch_tweets(
-            "https://twitter.com/home",
+            "https://www.reddit.com/r/CryptoCurrency/",
             start_date_hour,
             now,
         )
@@ -592,7 +573,7 @@ if __name__ == "__main__":
                 # Send message to Lark
                 json_data = json.dumps(value, ensure_ascii=False, indent=4)
                 lark.send_message(json_data)
-        random_number = random.randint(1000, 1500)
+        random_number = random.randint(100, 150)
         time.sleep(random_number)
         scraper.one_fectch_twitter_map.clear()
 
